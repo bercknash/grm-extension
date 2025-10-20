@@ -1,0 +1,18 @@
+<svg width="128" height="128" viewBox="0 0 128 128" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle -->
+  <circle cx="64" cy="64" r="64" fill="#2563eb"/>
+
+  <!-- Magnifying glass -->
+  <g transform="translate(32, 32)">
+    <!-- Glass circle -->
+    <circle cx="28" cy="28" r="20" fill="none" stroke="white" stroke-width="6"/>
+
+    <!-- Handle -->
+    <line x1="42" y1="42" x2="56" y2="56" stroke="white" stroke-width="6" stroke-linecap="round"/>
+
+    <!-- Forum/thread lines inside magnifying glass -->
+    <line x1="20" y1="24" x2="36" y2="24" stroke="white" stroke-width="2" stroke-linecap="round"/>
+    <line x1="20" y1="28" x2="36" y2="28" stroke="white" stroke-width="2" stroke-linecap="round"/>
+    <line x1="20" y1="32" x2="32" y2="32" stroke="white" stroke-width="2" stroke-linecap="round"/>
+  </g>
+</svg>
