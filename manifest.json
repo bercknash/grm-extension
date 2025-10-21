@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "GRM Forum Thread Search",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Search within threads on Grassroots Motorsports forum",
   "permissions": [
     "activeTab"

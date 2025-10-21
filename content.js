@@ -1,5 +1,5 @@
 // GRM Forum Thread Search Extension
-// Adds in-thread search functionality to Grassroots Motorsports forum
+// Adds in-thread search functionality across all pages of Grassroots Motorsports forum
 
 (function() {
   'use strict';
@@ -10,8 +10,10 @@
   }
 
   let currentSearchTerm = '';
-  let currentMatchIndex = 0;
-  let matches = [];
+  let searchResults = [];
+  let currentResultIndex = 0;
+  let allPages = [];
+  let isSearching = false;
 
   // Create and inject the search UI
   function createSearchUI() {
@@ -27,11 +29,8 @@
       </div>
       <div id="grm-search-panel" class="grm-search-panel" style="display: none;">
         <div class="grm-search-controls">
-          <input type="text" id="grm-search-input" placeholder="Search in thread..." />
-          <button id="grm-search-prev" class="grm-nav-btn" title="Previous" disabled>↑</button>
-          <button id="grm-search-next" class="grm-nav-btn" title="Next" disabled>↓</button>
-          <span id="grm-search-count" class="grm-search-count">0/0</span>
-          <button id="grm-search-clear" class="grm-clear-btn" title="Clear">✕</button>
+          <input type="text" id="grm-search-input" placeholder="Search across all pages..." />
+          <button id="grm-search-btn" class="grm-search-btn">Search</button>
         </div>
         <div class="grm-search-options">
           <label>
@@ -42,7 +41,13 @@
             <input type="checkbox" id="grm-whole-word" />
             Whole word
           </label>
+          <label>
+            <input type="checkbox" id="grm-current-page-only" />
+            Current page only
+          </label>
         </div>
+        <div id="grm-search-status" class="grm-search-status"></div>
+        <div id="grm-search-results" class="grm-search-results"></div>
       </div>
     `;
 
@@ -52,14 +57,10 @@
 
   // Check if we're on a thread page
   function isThreadPage() {
-    // Thread pages typically have multiple posts
-    // For now, just check if we're on any forum page - we'll refine this later
     const isForumPage = window.location.pathname.includes('/forum/');
     console.log('GRM Thread Search: Checking if thread page');
     console.log('- URL:', window.location.href);
     console.log('- Is forum page:', isForumPage);
-
-    // Run on all forum pages - we'll check for posts when searching
     return isForumPage;
   }
 
@@ -68,11 +69,7 @@
     const toggleBtn = document.getElementById('grm-search-toggle');
     const panel = document.getElementById('grm-search-panel');
     const searchInput = document.getElementById('grm-search-input');
-    const prevBtn = document.getElementById('grm-search-prev');
-    const nextBtn = document.getElementById('grm-search-next');
-    const clearBtn = document.getElementById('grm-search-clear');
-    const caseSensitive = document.getElementById('grm-case-sensitive');
-    const wholeWord = document.getElementById('grm-whole-word');
+    const searchBtn = document.getElementById('grm-search-btn');
 
     toggleBtn.addEventListener('click', () => {
       const isVisible = panel.style.display !== 'none';
@@ -82,35 +79,15 @@
       }
     });
 
-    searchInput.addEventListener('input', debounce(() => {
+    searchBtn.addEventListener('click', () => {
       performSearch(searchInput.value);
-    }, 300));
-
-    prevBtn.addEventListener('click', () => navigateMatches(-1));
-    nextBtn.addEventListener('click', () => navigateMatches(1));
-
-    clearBtn.addEventListener('click', () => {
-      searchInput.value = '';
-      clearSearch();
-    });
-
-    caseSensitive.addEventListener('change', () => {
-      if (searchInput.value) {
-        performSearch(searchInput.value);
-      }
-    });
-
-    wholeWord.addEventListener('change', () => {
-      if (searchInput.value) {
-        performSearch(searchInput.value);
-      }
     });
 
     // Keyboard shortcuts
     searchInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
-        navigateMatches(e.shiftKey ? -1 : 1);
+        performSearch(searchInput.value);
       } else if (e.key === 'Escape') {
         panel.style.display = 'none';
       }
@@ -126,123 +103,263 @@
     });
   }
 
-  // Perform search in thread posts
-  function performSearch(searchTerm) {
-    clearSearch();
+  // Get all page URLs for this thread
+  function getAllPageURLs() {
+    const currentURL = window.location.href;
+    const pages = [];
 
-    if (!searchTerm || searchTerm.trim().length === 0) {
-      return;
+    // Try to find pagination links
+    const paginationSelectors = [
+      'a[href*="/page"]',
+      '.pagination a',
+      '[class*="pagination"] a',
+      '[class*="pager"] a',
+      'a[href*="page="]'
+    ];
+
+    let pageLinks = [];
+    for (const selector of paginationSelectors) {
+      pageLinks = document.querySelectorAll(selector);
+      if (pageLinks.length > 0) break;
     }
 
-    currentSearchTerm = searchTerm;
-    const caseSensitive = document.getElementById('grm-case-sensitive').checked;
-    const wholeWord = document.getElementById('grm-whole-word').checked;
+    console.log('Found pagination links:', pageLinks.length);
 
-    console.log('GRM Thread Search - Searching for:', searchTerm);
+    // Extract unique page URLs
+    const urlSet = new Set();
 
-    // Search the entire document body (excluding our search UI)
-    // This works with any forum structure
-    const searchRoot = document.body;
+    // Add current page
+    urlSet.add(window.location.href);
 
-    highlightTextInElement(searchRoot, searchTerm, caseSensitive, wholeWord);
+    pageLinks.forEach(link => {
+      const href = link.href;
+      // Only include URLs from the same thread
+      if (href && href.includes('/forum/')) {
+        urlSet.add(href);
+      }
+    });
 
-    // Collect all matches
-    matches = Array.from(document.querySelectorAll('.grm-highlight'));
+    // Convert to array and sort
+    const urls = Array.from(urlSet).sort();
 
-    console.log('- Matches found:', matches.length);
+    console.log('Page URLs found:', urls);
 
-    updateMatchCount();
+    return urls;
+  }
 
-    if (matches.length > 0) {
-      currentMatchIndex = 0;
-      highlightCurrentMatch();
-      scrollToMatch(matches[0]);
-    } else {
-      console.log('No matches found for:', searchTerm);
+  // Fetch HTML content from a URL
+  async function fetchPageContent(url) {
+    try {
+      const response = await fetch(url);
+      const html = await response.text();
+      const parser = new DOMParser();
+      const doc = parser.parseFromString(html, 'text/html');
+      return doc;
+    } catch (error) {
+      console.error('Error fetching page:', url, error);
+      return null;
     }
   }
 
-  // Highlight text in an element
-  function highlightTextInElement(element, searchText, caseSensitive, wholeWord) {
-    const walker = document.createTreeWalker(
-      element,
+  // Search for text in a document
+  function searchInDocument(doc, searchTerm, caseSensitive, wholeWord) {
+    const results = [];
+    const searchRegex = createSearchRegex(searchTerm, caseSensitive, wholeWord);
+
+    // Walk through all text nodes
+    const walker = doc.createTreeWalker(
+      doc.body,
       NodeFilter.SHOW_TEXT,
       {
         acceptNode: function(node) {
-          // Skip script, style, and already highlighted elements
           if (node.parentElement.tagName === 'SCRIPT' ||
               node.parentElement.tagName === 'STYLE' ||
-              node.parentElement.tagName === 'NOSCRIPT' ||
-              node.parentElement.classList.contains('grm-highlight')) {
+              node.parentElement.tagName === 'NOSCRIPT') {
             return NodeFilter.FILTER_REJECT;
           }
-
-          // Skip our own search UI
-          let parent = node.parentElement;
-          while (parent) {
-            if (parent.id === 'grm-thread-search') {
-              return NodeFilter.FILTER_REJECT;
-            }
-            parent = parent.parentElement;
-          }
-
           return NodeFilter.FILTER_ACCEPT;
         }
       }
     );
 
-    const nodesToHighlight = [];
     let node;
-
     while (node = walker.nextNode()) {
       const text = node.nodeValue;
       if (!text || !text.trim()) continue;
 
-      const searchRegex = createSearchRegex(searchText, caseSensitive, wholeWord);
-      if (searchRegex.test(text)) {
-        nodesToHighlight.push(node);
+      let match;
+      const globalRegex = new RegExp(searchRegex.source, searchRegex.flags);
+      while ((match = globalRegex.exec(text)) !== null) {
+        // Get context around the match
+        const start = Math.max(0, match.index - 50);
+        const end = Math.min(text.length, match.index + match[0].length + 50);
+        const context = text.substring(start, end);
+
+        results.push({
+          text: match[0],
+          context: context,
+          fullText: text,
+          index: match.index
+        });
       }
     }
 
-    // Replace text nodes with highlighted versions
-    nodesToHighlight.forEach(node => {
-      const text = node.nodeValue;
-      const searchRegex = createSearchRegex(searchText, caseSensitive, wholeWord);
+    return results;
+  }
 
-      const fragment = document.createDocumentFragment();
-      let lastIndex = 0;
-      let match;
+  // Perform search across all pages
+  async function performSearch(searchTerm) {
+    if (!searchTerm || searchTerm.trim().length === 0) {
+      return;
+    }
 
-      // Reset regex
-      const globalRegex = new RegExp(searchRegex.source, searchRegex.flags + (searchRegex.flags.includes('g') ? '' : 'g'));
+    if (isSearching) {
+      console.log('Search already in progress');
+      return;
+    }
 
-      while ((match = globalRegex.exec(text)) !== null) {
-        // Add text before match
-        if (match.index > lastIndex) {
-          fragment.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+    isSearching = true;
+    currentSearchTerm = searchTerm;
+    searchResults = [];
+    currentResultIndex = 0;
+
+    const caseSensitive = document.getElementById('grm-case-sensitive').checked;
+    const wholeWord = document.getElementById('grm-whole-word').checked;
+    const currentPageOnly = document.getElementById('grm-current-page-only').checked;
+
+    const statusEl = document.getElementById('grm-search-status');
+    const resultsEl = document.getElementById('grm-search-results');
+
+    statusEl.textContent = 'Searching...';
+    resultsEl.innerHTML = '';
+
+    console.log('Starting search for:', searchTerm);
+
+    try {
+      if (currentPageOnly) {
+        // Search only current page
+        statusEl.textContent = 'Searching current page...';
+        const results = searchInDocument(document, searchTerm, caseSensitive, wholeWord);
+        searchResults.push({
+          pageURL: window.location.href,
+          pageNumber: getCurrentPageNumber(),
+          results: results
+        });
+      } else {
+        // Get all pages
+        const pageURLs = getAllPageURLs();
+        allPages = pageURLs;
+
+        statusEl.textContent = `Found ${pageURLs.length} page(s). Searching...`;
+
+        // Search each page
+        for (let i = 0; i < pageURLs.length; i++) {
+          const url = pageURLs[i];
+          statusEl.textContent = `Searching page ${i + 1} of ${pageURLs.length}...`;
+
+          const doc = await fetchPageContent(url);
+          if (doc) {
+            const results = searchInDocument(doc, searchTerm, caseSensitive, wholeWord);
+            if (results.length > 0) {
+              searchResults.push({
+                pageURL: url,
+                pageNumber: getPageNumberFromURL(url),
+                results: results
+              });
+            }
+          }
         }
-
-        // Add highlighted match
-        const highlight = document.createElement('span');
-        highlight.className = 'grm-highlight';
-        highlight.textContent = match[0];
-        fragment.appendChild(highlight);
-
-        lastIndex = match.index + match[0].length;
       }
 
-      // Add remaining text
-      if (lastIndex < text.length) {
-        fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
+      // Display results
+      displayResults();
+
+    } catch (error) {
+      console.error('Search error:', error);
+      statusEl.textContent = 'Search error: ' + error.message;
+    } finally {
+      isSearching = false;
+    }
+  }
+
+  // Get current page number from URL
+  function getCurrentPageNumber() {
+    return getPageNumberFromURL(window.location.href);
+  }
+
+  // Extract page number from URL
+  function getPageNumberFromURL(url) {
+    const match = url.match(/\/page(\d+)/);
+    if (match) {
+      return parseInt(match[1]);
+    }
+    const match2 = url.match(/[?&]page=(\d+)/);
+    if (match2) {
+      return parseInt(match2[1]);
+    }
+    return 1;
+  }
+
+  // Display search results
+  function displayResults() {
+    const statusEl = document.getElementById('grm-search-status');
+    const resultsEl = document.getElementById('grm-search-results');
+
+    // Count total matches
+    const totalMatches = searchResults.reduce((sum, page) => sum + page.results.length, 0);
+
+    if (totalMatches === 0) {
+      statusEl.textContent = `No results found for "${currentSearchTerm}"`;
+      resultsEl.innerHTML = '';
+      return;
+    }
+
+    statusEl.textContent = `Found ${totalMatches} match(es) across ${searchResults.length} page(s)`;
+
+    // Build results HTML
+    let html = '<div class="grm-results-list">';
+
+    searchResults.forEach(page => {
+      html += `<div class="grm-page-results">`;
+      html += `<div class="grm-page-header">Page ${page.pageNumber} (${page.results.length} match(es))</div>`;
+
+      page.results.slice(0, 10).forEach((result, idx) => {
+        const contextPreview = escapeHtml(result.context)
+          .replace(
+            new RegExp(escapeRegex(result.text), 'gi'),
+            '<mark>$&</mark>'
+          );
+
+        html += `<div class="grm-result-item" data-url="${escapeHtml(page.pageURL)}">`;
+        html += `<div class="grm-result-context">${contextPreview}</div>`;
+        html += `</div>`;
+      });
+
+      if (page.results.length > 10) {
+        html += `<div class="grm-more-results">... and ${page.results.length - 10} more match(es)</div>`;
       }
 
-      node.parentNode.replaceChild(fragment, node);
+      html += `</div>`;
+    });
+
+    html += '</div>';
+
+    resultsEl.innerHTML = html;
+
+    // Add click handlers to results
+    resultsEl.querySelectorAll('.grm-result-item').forEach(item => {
+      item.addEventListener('click', () => {
+        const url = item.getAttribute('data-url');
+        if (url) {
+          window.location.href = url;
+        }
+      });
     });
   }
 
   // Create search regex based on options
   function createSearchRegex(searchText, caseSensitive, wholeWord) {
-    let pattern = searchText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); // Escape special chars
+    let pattern = searchText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
     if (wholeWord) {
       pattern = '\\b' + pattern + '\\b';
@@ -252,97 +369,20 @@
     return new RegExp(pattern, flags);
   }
 
-  // Navigate between matches
-  function navigateMatches(direction) {
-    if (matches.length === 0) return;
-
-    // Remove current highlight
-    if (matches[currentMatchIndex]) {
-      matches[currentMatchIndex].classList.remove('grm-current');
-    }
-
-    // Update index
-    currentMatchIndex += direction;
-
-    if (currentMatchIndex < 0) {
-      currentMatchIndex = matches.length - 1;
-    } else if (currentMatchIndex >= matches.length) {
-      currentMatchIndex = 0;
-    }
-
-    highlightCurrentMatch();
-    scrollToMatch(matches[currentMatchIndex]);
-    updateMatchCount();
+  // Escape HTML for display
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
   }
 
-  // Highlight the current match
-  function highlightCurrentMatch() {
-    if (matches[currentMatchIndex]) {
-      matches[currentMatchIndex].classList.add('grm-current');
-    }
-  }
-
-  // Scroll to a match
-  function scrollToMatch(element) {
-    if (!element) return;
-
-    element.scrollIntoView({
-      behavior: 'smooth',
-      block: 'center'
-    });
-  }
-
-  // Update match count display
-  function updateMatchCount() {
-    const countElement = document.getElementById('grm-search-count');
-    const prevBtn = document.getElementById('grm-search-prev');
-    const nextBtn = document.getElementById('grm-search-next');
-
-    if (matches.length > 0) {
-      countElement.textContent = `${currentMatchIndex + 1}/${matches.length}`;
-      prevBtn.disabled = false;
-      nextBtn.disabled = false;
-    } else {
-      countElement.textContent = '0/0';
-      prevBtn.disabled = true;
-      nextBtn.disabled = true;
-    }
-  }
-
-  // Clear all search highlights
-  function clearSearch() {
-    const highlights = document.querySelectorAll('.grm-highlight');
-    highlights.forEach(highlight => {
-      const text = highlight.textContent;
-      const textNode = document.createTextNode(text);
-      highlight.parentNode.replaceChild(textNode, highlight);
-    });
-
-    // Merge adjacent text nodes
-    document.body.normalize();
-
-    matches = [];
-    currentMatchIndex = 0;
-    currentSearchTerm = '';
-    updateMatchCount();
-  }
-
-  // Debounce function for search input
-  function debounce(func, wait) {
-    let timeout;
-    return function executedFunction(...args) {
-      const later = () => {
-        clearTimeout(timeout);
-        func(...args);
-      };
-      clearTimeout(timeout);
-      timeout = setTimeout(later, wait);
-    };
+  // Escape regex special characters
+  function escapeRegex(text) {
+    return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
   // Initialize the extension
   function init() {
-    // Wait for DOM to be ready
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', createSearchUI);
     } else {
