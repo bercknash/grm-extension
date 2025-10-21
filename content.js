@@ -53,11 +53,14 @@
   // Check if we're on a thread page
   function isThreadPage() {
     // Thread pages typically have multiple posts
-    // Adjust this selector based on actual forum structure
-    return window.location.pathname.includes('/forum/') &&
-           (document.querySelector('.forum-post') ||
-            document.querySelector('.comment') ||
-            document.querySelector('[class*="post"]'));
+    // For now, just check if we're on any forum page - we'll refine this later
+    const isForumPage = window.location.pathname.includes('/forum/');
+    console.log('GRM Thread Search: Checking if thread page');
+    console.log('- URL:', window.location.href);
+    console.log('- Is forum page:', isForumPage);
+
+    // Run on all forum pages - we'll check for posts when searching
+    return isForumPage;
   }
 
   // Attach event listeners to search controls
@@ -143,17 +146,46 @@
       '[class*="comment-body"]',
       'article',
       '.post',
-      '.message-body'
+      '.message-body',
+      // Additional selectors to try
+      '.message',
+      '.forum-comment',
+      '[class*="comment"]',
+      '[class*="message"]',
+      'div[id*="post"]',
+      'div[id*="comment"]'
     ];
 
     let posts = [];
+    let foundSelector = '';
     for (const selector of postSelectors) {
       posts = document.querySelectorAll(selector);
-      if (posts.length > 0) break;
+      if (posts.length > 0) {
+        foundSelector = selector;
+        break;
+      }
     }
+
+    console.log('GRM Thread Search - Debug Info:');
+    console.log('- Search term:', searchTerm);
+    console.log('- Found selector:', foundSelector);
+    console.log('- Number of posts found:', posts.length);
+    console.log('- First post element:', posts[0]);
 
     if (posts.length === 0) {
       console.warn('GRM Thread Search: Could not find posts on this page');
+      console.warn('Please check the browser console and report the page structure.');
+      console.warn('Current URL:', window.location.href);
+
+      // Try to find any likely container elements for debugging
+      console.warn('Potential containers found on page:');
+      console.warn('- DIVs with class containing "post":', document.querySelectorAll('div[class*="post" i]').length);
+      console.warn('- DIVs with class containing "comment":', document.querySelectorAll('div[class*="comment" i]').length);
+      console.warn('- DIVs with class containing "message":', document.querySelectorAll('div[class*="message" i]').length);
+      console.warn('- Articles:', document.querySelectorAll('article').length);
+      console.warn('- All DIVs with classes:', Array.from(new Set(Array.from(document.querySelectorAll('div[class]')).map(el => el.className).filter(c => c))).slice(0, 20));
+
+      alert('Could not find forum posts. Please open the browser console (F12) and send me the debug information.');
       return;
     }
 
