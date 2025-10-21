@@ -106,43 +106,45 @@
   // Get all page URLs for this thread
   function getAllPageURLs() {
     const currentURL = window.location.href;
-    const pages = [];
-
-    // Try to find pagination links
-    const paginationSelectors = [
-      'a[href*="/page"]',
-      '.pagination a',
-      '[class*="pagination"] a',
-      '[class*="pager"] a',
-      'a[href*="page="]'
-    ];
-
-    let pageLinks = [];
-    for (const selector of paginationSelectors) {
-      pageLinks = document.querySelectorAll(selector);
-      if (pageLinks.length > 0) break;
-    }
-
-    console.log('Found pagination links:', pageLinks.length);
-
-    // Extract unique page URLs
     const urlSet = new Set();
 
     // Add current page
-    urlSet.add(window.location.href);
+    urlSet.add(currentURL);
 
-    pageLinks.forEach(link => {
+    // GRM forum uses URLs like: /forum/grm/thread-title/282380/page1/
+    // Try to find pagination links in .pages div
+    const pagesDiv = document.querySelector('.pages');
+    if (pagesDiv) {
+      const pageLinks = pagesDiv.querySelectorAll('a[href*="/page"]');
+      pageLinks.forEach(link => {
+        if (link.href && link.href.includes('/forum/')) {
+          urlSet.add(link.href);
+        }
+      });
+    }
+
+    // Also check for any pagination links elsewhere on the page
+    const allPageLinks = document.querySelectorAll('a[href*="/page"]');
+    allPageLinks.forEach(link => {
       const href = link.href;
-      // Only include URLs from the same thread
+      // Only include URLs from the same thread (must contain the thread ID)
       if (href && href.includes('/forum/')) {
-        urlSet.add(href);
+        // Extract thread ID from current URL
+        const currentMatch = currentURL.match(/\/(\d+)\//);
+        if (currentMatch) {
+          const threadId = currentMatch[1];
+          // Only add if it's from the same thread
+          if (href.includes('/' + threadId + '/')) {
+            urlSet.add(href);
+          }
+        }
       }
     });
 
-    // Convert to array and sort
+    // If we only found the current page, that's fine - single page thread
     const urls = Array.from(urlSet).sort();
 
-    console.log('Page URLs found:', urls);
+    console.log('GRM Thread Search - Found page URLs:', urls);
 
     return urls;
   }
@@ -166,17 +168,33 @@
     const results = [];
     const searchRegex = createSearchRegex(searchTerm, caseSensitive, wholeWord);
 
+    // GRM forum: posts are in .post elements, content in .post .content
+    // Search within the .postlist container to avoid navigation/ads
+    const postList = doc.querySelector('.postlist');
+    const searchRoot = postList || doc.body;
+
     // Walk through all text nodes
     const walker = doc.createTreeWalker(
-      doc.body,
+      searchRoot,
       NodeFilter.SHOW_TEXT,
       {
         acceptNode: function(node) {
+          // Skip script, style, noscript
           if (node.parentElement.tagName === 'SCRIPT' ||
               node.parentElement.tagName === 'STYLE' ||
               node.parentElement.tagName === 'NOSCRIPT') {
             return NodeFilter.FILTER_REJECT;
           }
+
+          // Skip our own search UI (when searching current page)
+          let parent = node.parentElement;
+          while (parent) {
+            if (parent.id === 'grm-thread-search') {
+              return NodeFilter.FILTER_REJECT;
+            }
+            parent = parent.parentElement;
+          }
+
           return NodeFilter.FILTER_ACCEPT;
         }
       }
