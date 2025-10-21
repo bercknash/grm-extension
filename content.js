@@ -395,7 +395,7 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
             '<mark>$&</mark>'
           );
 
-        html += `<div class="grm-result-item" data-url="${escapeHtml(page.pageURL)}">`;
+        html += `<div class="grm-result-item" data-url="${escapeHtml(page.pageURL)}" data-match-index="${idx}">`;
         html += `<div class="grm-result-context">${contextPreview}</div>`;
         html += `</div>`;
       });
@@ -415,6 +415,7 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
     resultsEl.querySelectorAll('.grm-result-item').forEach(item => {
       item.addEventListener('click', () => {
         const url = item.getAttribute('data-url');
+        const matchIndex = item.getAttribute('data-match-index');
         if (url) {
           // Store search term, options, AND results in sessionStorage
           sessionStorage.setItem('grm_search_term', currentSearchTerm);
@@ -422,6 +423,8 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
             caseSensitive: document.getElementById('grm-case-sensitive').checked,
             wholeWord: document.getElementById('grm-whole-word').checked
           }));
+          // Store which specific match was clicked
+          sessionStorage.setItem('grm_match_index', matchIndex);
           // Store the complete search results to restore later
           sessionStorage.setItem('grm_search_results', JSON.stringify(searchResults));
           sessionStorage.setItem('grm_search_from_url', window.location.href);
@@ -504,9 +507,14 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
   function highlightStoredSearch() {
     const searchTerm = sessionStorage.getItem('grm_search_term');
     const searchOptionsJson = sessionStorage.getItem('grm_search_options');
+    const targetMatchIndex = sessionStorage.getItem('grm_match_index');
 
     if (searchTerm) {
       console.log('GRM Thread Search: Found stored search term:', searchTerm);
+
+      if (targetMatchIndex !== null) {
+        console.log('GRM Thread Search: Target match index:', targetMatchIndex);
+      }
 
       // DON'T clear the stored search - we want to keep it for going back
       // sessionStorage.removeItem('grm_search_term');
@@ -516,6 +524,7 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
         const searchOptions = searchOptionsJson ? JSON.parse(searchOptionsJson) : {};
         const caseSensitive = searchOptions.caseSensitive || false;
         const wholeWord = searchOptions.wholeWord || false;
+        const targetIndex = targetMatchIndex !== null ? parseInt(targetMatchIndex) : 0;
 
         // Find the postlist container
         const postList = document.querySelector('.postlist');
@@ -524,7 +533,7 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
           return;
         }
 
-        // Search for the term and highlight first match
+        // Search for the term and highlight matches
         const searchRegex = createSearchRegex(searchTerm, caseSensitive, wholeWord);
         const walker = document.createTreeWalker(
           postList,
@@ -541,8 +550,10 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
           }
         );
 
-        let foundFirst = false;
+        let matchCount = 0;
+        let targetHighlight = null;
         let node;
+
         while (node = walker.nextNode()) {
           const text = node.nodeValue;
           if (!text || !searchRegex.test(text)) continue;
@@ -559,22 +570,27 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
             }
 
             const highlight = document.createElement('span');
-            highlight.className = 'grm-highlight grm-current';
+            highlight.className = 'grm-highlight';
             highlight.textContent = match[0];
-            highlight.style.backgroundColor = '#fb923c';
-            highlight.style.color = 'white';
             highlight.style.fontWeight = '500';
-            highlight.style.padding = '2px 4px';
             highlight.style.borderRadius = '2px';
-            fragment.appendChild(highlight);
 
-            // Scroll to first match
-            if (!foundFirst) {
-              foundFirst = true;
-              setTimeout(() => {
-                highlight.scrollIntoView({ behavior: 'smooth', block: 'center' });
-              }, 100);
+            // Check if this is our target match
+            if (matchCount === targetIndex) {
+              highlight.classList.add('grm-current');
+              highlight.style.backgroundColor = '#fb923c';
+              highlight.style.color = 'white';
+              highlight.style.padding = '2px 4px';
+              targetHighlight = highlight;
+            } else {
+              // Style non-target matches differently
+              highlight.style.backgroundColor = '#fef08a';
+              highlight.style.color = '#854d0e';
+              highlight.style.padding = '2px 0';
             }
+
+            fragment.appendChild(highlight);
+            matchCount++;
 
             lastIndex = match.index + match[0].length;
           }
@@ -584,6 +600,13 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
           }
 
           node.parentNode.replaceChild(fragment, node);
+        }
+
+        // Scroll to the target match
+        if (targetHighlight) {
+          setTimeout(() => {
+            targetHighlight.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          }, 100);
         }
 
       } catch (error) {
