@@ -138,70 +138,27 @@
     const caseSensitive = document.getElementById('grm-case-sensitive').checked;
     const wholeWord = document.getElementById('grm-whole-word').checked;
 
-    // Find all post containers - adjust selectors based on actual forum structure
-    const postSelectors = [
-      '.forum-post',
-      '.comment',
-      '[class*="post-content"]',
-      '[class*="comment-body"]',
-      'article',
-      '.post',
-      '.message-body',
-      // Additional selectors to try
-      '.message',
-      '.forum-comment',
-      '[class*="comment"]',
-      '[class*="message"]',
-      'div[id*="post"]',
-      'div[id*="comment"]'
-    ];
+    console.log('GRM Thread Search - Searching for:', searchTerm);
 
-    let posts = [];
-    let foundSelector = '';
-    for (const selector of postSelectors) {
-      posts = document.querySelectorAll(selector);
-      if (posts.length > 0) {
-        foundSelector = selector;
-        break;
-      }
-    }
+    // Search the entire document body (excluding our search UI)
+    // This works with any forum structure
+    const searchRoot = document.body;
 
-    console.log('GRM Thread Search - Debug Info:');
-    console.log('- Search term:', searchTerm);
-    console.log('- Found selector:', foundSelector);
-    console.log('- Number of posts found:', posts.length);
-    console.log('- First post element:', posts[0]);
-
-    if (posts.length === 0) {
-      console.warn('GRM Thread Search: Could not find posts on this page');
-      console.warn('Please check the browser console and report the page structure.');
-      console.warn('Current URL:', window.location.href);
-
-      // Try to find any likely container elements for debugging
-      console.warn('Potential containers found on page:');
-      console.warn('- DIVs with class containing "post":', document.querySelectorAll('div[class*="post" i]').length);
-      console.warn('- DIVs with class containing "comment":', document.querySelectorAll('div[class*="comment" i]').length);
-      console.warn('- DIVs with class containing "message":', document.querySelectorAll('div[class*="message" i]').length);
-      console.warn('- Articles:', document.querySelectorAll('article').length);
-      console.warn('- All DIVs with classes:', Array.from(new Set(Array.from(document.querySelectorAll('div[class]')).map(el => el.className).filter(c => c))).slice(0, 20));
-
-      alert('Could not find forum posts. Please open the browser console (F12) and send me the debug information.');
-      return;
-    }
-
-    // Search within each post
-    posts.forEach((post) => {
-      highlightTextInElement(post, searchTerm, caseSensitive, wholeWord);
-    });
+    highlightTextInElement(searchRoot, searchTerm, caseSensitive, wholeWord);
 
     // Collect all matches
     matches = Array.from(document.querySelectorAll('.grm-highlight'));
+
+    console.log('- Matches found:', matches.length);
+
     updateMatchCount();
 
     if (matches.length > 0) {
       currentMatchIndex = 0;
       highlightCurrentMatch();
       scrollToMatch(matches[0]);
+    } else {
+      console.log('No matches found for:', searchTerm);
     }
   }
 
@@ -215,9 +172,20 @@
           // Skip script, style, and already highlighted elements
           if (node.parentElement.tagName === 'SCRIPT' ||
               node.parentElement.tagName === 'STYLE' ||
+              node.parentElement.tagName === 'NOSCRIPT' ||
               node.parentElement.classList.contains('grm-highlight')) {
             return NodeFilter.FILTER_REJECT;
           }
+
+          // Skip our own search UI
+          let parent = node.parentElement;
+          while (parent) {
+            if (parent.id === 'grm-thread-search') {
+              return NodeFilter.FILTER_REJECT;
+            }
+            parent = parent.parentElement;
+          }
+
           return NodeFilter.FILTER_ACCEPT;
         }
       }
