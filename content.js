@@ -1,13 +1,21 @@
-// GRM Forum Thread Search Extension
+// GRM Forum Thread Search Extension v2.0.0
 // Adds in-thread search functionality across all pages of Grassroots Motorsports forum
+
+console.log('GRM Thread Search: Script loaded!');
+console.log('GRM Thread Search: Current URL:', window.location.href);
 
 (function() {
   'use strict';
 
+  console.log('GRM Thread Search: Inside IIFE');
+
   // Only run on thread pages
   if (!isThreadPage()) {
+    console.log('GRM Thread Search: Not a thread page, exiting');
     return;
   }
+
+  console.log('GRM Thread Search: Is a thread page, initializing...');
 
   let currentSearchTerm = '';
   let searchResults = [];
