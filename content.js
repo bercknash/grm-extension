@@ -106,45 +106,54 @@
   // Get all page URLs for this thread
   function getAllPageURLs() {
     const currentURL = window.location.href;
-    const urlSet = new Set();
 
-    // Add current page
-    urlSet.add(currentURL);
-
-    // GRM forum uses URLs like: /forum/grm/thread-title/282380/page1/
-    // Try to find pagination links in .pages div
-    const pagesDiv = document.querySelector('.pages');
-    if (pagesDiv) {
-      const pageLinks = pagesDiv.querySelectorAll('a[href*="/page"]');
-      pageLinks.forEach(link => {
-        if (link.href && link.href.includes('/forum/')) {
-          urlSet.add(link.href);
-        }
-      });
+    // Extract thread ID and base URL pattern from current URL
+    // URL format: /forum/grm/thread-title/96587/page1/
+    const urlMatch = currentURL.match(/^(.*\/forum\/[^\/]+\/[^\/]+\/\d+\/)/);
+    if (!urlMatch) {
+      console.log('GRM Thread Search - Could not parse URL format');
+      return [currentURL];
     }
 
-    // Also check for any pagination links elsewhere on the page
-    const allPageLinks = document.querySelectorAll('a[href*="/page"]');
-    allPageLinks.forEach(link => {
-      const href = link.href;
-      // Only include URLs from the same thread (must contain the thread ID)
-      if (href && href.includes('/forum/')) {
-        // Extract thread ID from current URL
-        const currentMatch = currentURL.match(/\/(\d+)\//);
-        if (currentMatch) {
-          const threadId = currentMatch[1];
-          // Only add if it's from the same thread
-          if (href.includes('/' + threadId + '/')) {
-            urlSet.add(href);
+    const baseURL = urlMatch[1];
+    const threadIdMatch = currentURL.match(/\/(\d+)\//);
+    const threadId = threadIdMatch ? threadIdMatch[1] : null;
+
+    // Find the maximum page number from pagination
+    const pagesDiv = document.querySelector('.pages');
+    let maxPage = 1;
+
+    if (pagesDiv) {
+      // Look for all page links
+      const pageLinks = pagesDiv.querySelectorAll('a[href*="/page"]');
+      pageLinks.forEach(link => {
+        const pageMatch = link.href.match(/\/page(\d+)\//);
+        if (pageMatch) {
+          const pageNum = parseInt(pageMatch[1]);
+          if (pageNum > maxPage) {
+            maxPage = pageNum;
           }
         }
+      });
+
+      // Also check for current page number
+      const currentSpan = pagesDiv.querySelector('.current');
+      if (currentSpan) {
+        const currentPageNum = parseInt(currentSpan.textContent);
+        if (!isNaN(currentPageNum) && currentPageNum > maxPage) {
+          maxPage = currentPageNum;
+        }
       }
-    });
+    }
 
-    // If we only found the current page, that's fine - single page thread
-    const urls = Array.from(urlSet).sort();
+    // Generate all page URLs from 1 to maxPage
+    const urls = [];
+    for (let i = 1; i <= maxPage; i++) {
+      urls.push(`${baseURL}page${i}/`);
+    }
 
-    console.log('GRM Thread Search - Found page URLs:', urls);
+    console.log(`GRM Thread Search - Thread ${threadId}: Found ${maxPage} page(s)`);
+    console.log('GRM Thread Search - Generated URLs:', urls.length > 10 ? `${urls.slice(0, 3).join(', ')} ... ${urls.slice(-2).join(', ')}` : urls);
 
     return urls;
   }
