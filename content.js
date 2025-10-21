@@ -287,23 +287,36 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
 
         statusEl.textContent = `Found ${pageURLs.length} page(s). Searching...`;
 
-        // Search each page
-        for (let i = 0; i < pageURLs.length; i++) {
-          const url = pageURLs[i];
-          statusEl.textContent = `Searching page ${i + 1} of ${pageURLs.length}...`;
+        // Fetch and search all pages IN PARALLEL for much better performance
+        let completedPages = 0;
+        const searchPromises = pageURLs.map(async (url, index) => {
+          try {
+            const doc = await fetchPageContent(url);
+            completedPages++;
+            statusEl.textContent = `Searching... (${completedPages}/${pageURLs.length} pages loaded)`;
 
-          const doc = await fetchPageContent(url);
-          if (doc) {
-            const results = searchInDocument(doc, searchTerm, caseSensitive, wholeWord);
-            if (results.length > 0) {
-              searchResults.push({
-                pageURL: url,
-                pageNumber: getPageNumberFromURL(url),
-                results: results
-              });
+            if (doc) {
+              const results = searchInDocument(doc, searchTerm, caseSensitive, wholeWord);
+              if (results.length > 0) {
+                return {
+                  pageURL: url,
+                  pageNumber: getPageNumberFromURL(url),
+                  results: results
+                };
+              }
             }
+            return null;
+          } catch (error) {
+            console.error('Error searching page:', url, error);
+            return null;
           }
-        }
+        });
+
+        // Wait for all pages to complete
+        const allResults = await Promise.all(searchPromises);
+
+        // Filter out null results (pages with no matches or errors)
+        searchResults = allResults.filter(r => r !== null);
       }
 
       // Display results
@@ -386,6 +399,12 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
       item.addEventListener('click', () => {
         const url = item.getAttribute('data-url');
         if (url) {
+          // Store search term and options in sessionStorage so we can highlight on the target page
+          sessionStorage.setItem('grm_search_term', currentSearchTerm);
+          sessionStorage.setItem('grm_search_options', JSON.stringify({
+            caseSensitive: document.getElementById('grm-case-sensitive').checked,
+            wholeWord: document.getElementById('grm-whole-word').checked
+          }));
           window.location.href = url;
         }
       });
@@ -416,12 +435,108 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
     return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
+  // Highlight search term on page if coming from search results
+  function highlightStoredSearch() {
+    const searchTerm = sessionStorage.getItem('grm_search_term');
+    const searchOptionsJson = sessionStorage.getItem('grm_search_options');
+
+    if (searchTerm) {
+      console.log('GRM Thread Search: Found stored search term:', searchTerm);
+
+      // Clear the stored search term so it doesn't persist
+      sessionStorage.removeItem('grm_search_term');
+      sessionStorage.removeItem('grm_search_options');
+
+      try {
+        const searchOptions = searchOptionsJson ? JSON.parse(searchOptionsJson) : {};
+        const caseSensitive = searchOptions.caseSensitive || false;
+        const wholeWord = searchOptions.wholeWord || false;
+
+        // Find the postlist container
+        const postList = document.querySelector('.postlist');
+        if (!postList) {
+          console.log('GRM Thread Search: Could not find .postlist container');
+          return;
+        }
+
+        // Search for the term and highlight first match
+        const searchRegex = createSearchRegex(searchTerm, caseSensitive, wholeWord);
+        const walker = document.createTreeWalker(
+          postList,
+          NodeFilter.SHOW_TEXT,
+          {
+            acceptNode: function(node) {
+              if (node.parentElement.tagName === 'SCRIPT' ||
+                  node.parentElement.tagName === 'STYLE' ||
+                  node.parentElement.tagName === 'NOSCRIPT') {
+                return NodeFilter.FILTER_REJECT;
+              }
+              return NodeFilter.FILTER_ACCEPT;
+            }
+          }
+        );
+
+        let foundFirst = false;
+        let node;
+        while (node = walker.nextNode()) {
+          const text = node.nodeValue;
+          if (!text || !searchRegex.test(text)) continue;
+
+          // Highlight this text node
+          const fragment = document.createDocumentFragment();
+          let lastIndex = 0;
+          let match;
+          const globalRegex = new RegExp(searchRegex.source, searchRegex.flags + (searchRegex.flags.includes('g') ? '' : 'g'));
+
+          while ((match = globalRegex.exec(text)) !== null) {
+            if (match.index > lastIndex) {
+              fragment.appendChild(document.createTextNode(text.slice(lastIndex, match.index)));
+            }
+
+            const highlight = document.createElement('span');
+            highlight.className = 'grm-highlight grm-current';
+            highlight.textContent = match[0];
+            highlight.style.backgroundColor = '#fb923c';
+            highlight.style.color = 'white';
+            highlight.style.fontWeight = '500';
+            highlight.style.padding = '2px 4px';
+            highlight.style.borderRadius = '2px';
+            fragment.appendChild(highlight);
+
+            // Scroll to first match
+            if (!foundFirst) {
+              foundFirst = true;
+              setTimeout(() => {
+                highlight.scrollIntoView({ behavior: 'smooth', block: 'center' });
+              }, 100);
+            }
+
+            lastIndex = match.index + match[0].length;
+          }
+
+          if (lastIndex < text.length) {
+            fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
+          }
+
+          node.parentNode.replaceChild(fragment, node);
+        }
+
+      } catch (error) {
+        console.error('GRM Thread Search: Error highlighting stored search:', error);
+      }
+    }
+  }
+
   // Initialize the extension
   function init() {
     if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', createSearchUI);
+      document.addEventListener('DOMContentLoaded', () => {
+        createSearchUI();
+        highlightStoredSearch();
+      });
     } else {
       createSearchUI();
+      highlightStoredSearch();
     }
   }
 
