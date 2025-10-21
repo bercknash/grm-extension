@@ -258,6 +258,12 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
     searchResults = [];
     currentResultIndex = 0;
 
+    // Clear any previously stored search results when starting a new search
+    sessionStorage.removeItem('grm_search_results');
+    sessionStorage.removeItem('grm_search_term');
+    sessionStorage.removeItem('grm_search_options');
+    sessionStorage.removeItem('grm_search_from_url');
+
     const caseSensitive = document.getElementById('grm-case-sensitive').checked;
     const wholeWord = document.getElementById('grm-whole-word').checked;
     const currentPageOnly = document.getElementById('grm-current-page-only').checked;
@@ -321,6 +327,17 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
 
       // Display results
       displayResults();
+
+      // Store search results and options for later restoration
+      if (searchResults.length > 0) {
+        sessionStorage.setItem('grm_search_results', JSON.stringify(searchResults));
+        sessionStorage.setItem('grm_search_term', currentSearchTerm);
+        sessionStorage.setItem('grm_search_options', JSON.stringify({
+          caseSensitive: caseSensitive,
+          wholeWord: wholeWord
+        }));
+        sessionStorage.setItem('grm_search_from_url', window.location.href);
+      }
 
     } catch (error) {
       console.error('Search error:', error);
@@ -399,12 +416,16 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
       item.addEventListener('click', () => {
         const url = item.getAttribute('data-url');
         if (url) {
-          // Store search term and options in sessionStorage so we can highlight on the target page
+          // Store search term, options, AND results in sessionStorage
           sessionStorage.setItem('grm_search_term', currentSearchTerm);
           sessionStorage.setItem('grm_search_options', JSON.stringify({
             caseSensitive: document.getElementById('grm-case-sensitive').checked,
             wholeWord: document.getElementById('grm-whole-word').checked
           }));
+          // Store the complete search results to restore later
+          sessionStorage.setItem('grm_search_results', JSON.stringify(searchResults));
+          sessionStorage.setItem('grm_search_from_url', window.location.href);
+
           window.location.href = url;
         }
       });
@@ -435,6 +456,50 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
     return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
+  // Restore search results if available
+  function restoreSearchResults() {
+    const storedResults = sessionStorage.getItem('grm_search_results');
+    const storedTerm = sessionStorage.getItem('grm_search_term');
+    const storedOptions = sessionStorage.getItem('grm_search_options');
+
+    if (storedResults && storedTerm) {
+      try {
+        console.log('GRM Thread Search: Restoring previous search results');
+
+        // Restore the search state
+        currentSearchTerm = storedTerm;
+        searchResults = JSON.parse(storedResults);
+
+        // Open the search panel
+        const panel = document.getElementById('grm-search-panel');
+        if (panel) {
+          panel.style.display = 'block';
+        }
+
+        // Restore search options
+        if (storedOptions) {
+          const options = JSON.parse(storedOptions);
+          const caseSensitiveCheckbox = document.getElementById('grm-case-sensitive');
+          const wholeWordCheckbox = document.getElementById('grm-whole-word');
+          if (caseSensitiveCheckbox) caseSensitiveCheckbox.checked = options.caseSensitive;
+          if (wholeWordCheckbox) wholeWordCheckbox.checked = options.wholeWord;
+        }
+
+        // Set the search input value
+        const searchInput = document.getElementById('grm-search-input');
+        if (searchInput) {
+          searchInput.value = storedTerm;
+        }
+
+        // Display the results
+        displayResults();
+
+      } catch (error) {
+        console.error('GRM Thread Search: Error restoring search results:', error);
+      }
+    }
+  }
+
   // Highlight search term on page if coming from search results
   function highlightStoredSearch() {
     const searchTerm = sessionStorage.getItem('grm_search_term');
@@ -443,9 +508,9 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
     if (searchTerm) {
       console.log('GRM Thread Search: Found stored search term:', searchTerm);
 
-      // Clear the stored search term so it doesn't persist
-      sessionStorage.removeItem('grm_search_term');
-      sessionStorage.removeItem('grm_search_options');
+      // DON'T clear the stored search - we want to keep it for going back
+      // sessionStorage.removeItem('grm_search_term');
+      // sessionStorage.removeItem('grm_search_options');
 
       try {
         const searchOptions = searchOptionsJson ? JSON.parse(searchOptionsJson) : {};
@@ -532,10 +597,12 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
     if (document.readyState === 'loading') {
       document.addEventListener('DOMContentLoaded', () => {
         createSearchUI();
-        highlightStoredSearch();
+        restoreSearchResults();  // Restore search results first
+        highlightStoredSearch();  // Then highlight matches on the page
       });
     } else {
       createSearchUI();
+      restoreSearchResults();
       highlightStoredSearch();
     }
   }
