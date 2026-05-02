@@ -647,11 +647,29 @@
     return text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
   }
 
+  function threadBase(url) {
+    // Strip page suffix and trailing slash to get a stable thread identifier
+    return new URL(url).pathname.replace(/\/page\d+\/?$/, '').replace(/\/?$/, '');
+  }
+
   // Restore search results if available
   function restoreSearchResults() {
     const storedResults = sessionStorage.getItem('grm_search_results');
     const storedTerm = sessionStorage.getItem('grm_search_term');
     const storedOptions = sessionStorage.getItem('grm_search_options');
+    const fromUrl = sessionStorage.getItem('grm_search_from_url');
+
+    // Clear state if we've navigated to a different thread
+    if (fromUrl && threadBase(fromUrl) !== threadBase(window.location.href)) {
+      sessionStorage.removeItem('grm_search_results');
+      sessionStorage.removeItem('grm_search_term');
+      sessionStorage.removeItem('grm_search_options');
+      sessionStorage.removeItem('grm_search_from_url');
+      sessionStorage.removeItem('grm_auto_reopen');
+      sessionStorage.removeItem('grm_match_index');
+      sessionStorage.removeItem('grm_target_url');
+      return;
+    }
 
     if (storedResults && storedTerm) {
       try {
