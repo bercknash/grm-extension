@@ -124,9 +124,30 @@
   }
 
   // Attach event listeners to search controls
+  function openPanel() {
+    const panel = document.getElementById('grm-search-panel');
+    if (!panel) return;
+    panel.style.display = 'block';
+    constrainPanelToSidebar(panel);
+  }
+
   function closePanel() {
     const panel = document.getElementById('grm-search-panel');
     if (panel) panel.style.display = 'none';
+    document.body.style.paddingRight = '';
+  }
+
+  function constrainPanelToSidebar(panel) {
+    document.body.style.paddingRight = '';
+    const postList = document.querySelector('.postlist');
+    if (!postList) return;
+    let totalPadding = 0;
+    for (let i = 0; i < 8; i++) {
+      const overlap = postList.getBoundingClientRect().right - panel.getBoundingClientRect().left;
+      if (overlap <= 0) break;
+      totalPadding += Math.ceil(overlap);
+      document.body.style.paddingRight = totalPadding + 'px';
+    }
   }
 
   function closeSettingsPanel() {
@@ -198,7 +219,7 @@
         closePanel();
       } else {
         closeSettingsPanel();
-        panel.style.display = 'block';
+        openPanel();
         searchInput.focus();
       }
     });
@@ -224,7 +245,7 @@
           closePanel();
         } else {
           closeSettingsPanel();
-          panel.style.display = 'block';
+          openPanel();
           searchInput.focus();
         }
       }
@@ -235,6 +256,11 @@
         closePanel();
         closeSettingsPanel();
       }
+    });
+
+    window.addEventListener('resize', () => {
+      const panel = document.getElementById('grm-search-panel');
+      if (panel && panel.style.display !== 'none') constrainPanelToSidebar(panel);
     });
   }
 
@@ -641,7 +667,7 @@
         sessionStorage.removeItem('grm_auto_reopen');
         const panel = document.getElementById('grm-search-panel');
         if (panel && autoReopen === 'true') {
-          panel.style.display = 'block';
+          openPanel();
         }
 
         // Restore search options
@@ -904,7 +930,7 @@
       const panel = document.getElementById('grm-search-panel');
       if (panel) {
         closeSettingsPanel();
-        panel.style.display = 'block';
+        openPanel();
         setTimeout(() => document.getElementById('grm-search-input')?.focus(), 50);
       }
     } else if (message.action === 'applySetting') {
