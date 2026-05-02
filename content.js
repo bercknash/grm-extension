@@ -120,7 +120,7 @@
   }
 
   function isThreadPage() {
-    return window.location.pathname.includes('/forum/');
+    return /\/forum\/[^\/]+\/[^\/]+\/\d+\//.test(window.location.pathname);
   }
 
   // Attach event listeners to search controls
