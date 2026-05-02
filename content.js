@@ -129,12 +129,24 @@
     if (!panel) return;
     panel.style.display = 'block';
     constrainPanelToSidebar(panel);
+    // Re-constrain after images/resources load and finalize layout
+    window.addEventListener('load', () => {
+      if (panel.style.display !== 'none') constrainPanelToSidebar(panel);
+    }, { once: true });
+  }
+
+  function clearHighlights() {
+    document.querySelectorAll('.grm-highlight').forEach(el => {
+      el.style.cssText = '';
+      el.classList.add('grm-highlight-cleared');
+    });
   }
 
   function closePanel() {
     const panel = document.getElementById('grm-search-panel');
     if (panel) panel.style.display = 'none';
-    document.body.style.paddingRight = '';
+    clearHighlights();
+    // Leave padding-right in place; clears on navigation.
   }
 
   function constrainPanelToSidebar(panel) {
