@@ -23,17 +23,71 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
   let allPages = [];
   let isSearching = false;
 
+  const DEFAULT_SETTINGS = { searchEnabled: true, scrollEnabled: true, linksEnabled: true };
+
+  function loadSettings() {
+    try {
+      const stored = localStorage.getItem('grm_ext_settings');
+      return stored ? { ...DEFAULT_SETTINGS, ...JSON.parse(stored) } : { ...DEFAULT_SETTINGS };
+    } catch {
+      return { ...DEFAULT_SETTINGS };
+    }
+  }
+
+  function saveSettings(settings) {
+    localStorage.setItem('grm_ext_settings', JSON.stringify(settings));
+  }
+
   // Create and inject the search UI
   function createSearchUI() {
     const searchContainer = document.createElement('div');
     searchContainer.id = 'grm-thread-search';
     searchContainer.innerHTML = `
       <div class="grm-search-header">
+        <button id="grm-settings-toggle" class="grm-settings-btn" title="Extension settings">
+          <svg width="15" height="15" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492zM5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0z"/>
+            <path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.892 3.433-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.892-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52l-.094-.319zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 0 0 2.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 0 0 1.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 0 0-1.115 2.693l.16.291c.415.764-.42 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 0 0-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 0 0-2.692-1.115l-.292.16c-.764.415-1.6-.42-1.184-1.185l.159-.291A1.873 1.873 0 0 0 1.945 8.93l-.319-.094c-.835-.246-.835-1.428 0-1.674l.319-.094A1.873 1.873 0 0 0 3.06 4.377l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 0 0 2.692-1.115l.094-.319z"/>
+          </svg>
+        </button>
         <button id="grm-search-toggle" class="grm-toggle-btn" title="Toggle Search">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor">
             <path d="M11.742 10.344a6.5 6.5 0 1 0-1.397 1.398h-.001c.03.04.062.078.098.115l3.85 3.85a1 1 0 0 0 1.415-1.414l-3.85-3.85a1.007 1.007 0 0 0-.115-.1zM12 6.5a5.5 5.5 0 1 1-11 0 5.5 5.5 0 0 1 11 0z"/>
           </svg>
         </button>
+      </div>
+      <div id="grm-settings-panel" class="grm-settings-panel" style="display: none;">
+        <div class="grm-settings-title">GRM Extension</div>
+        <label class="grm-setting-row">
+          <div class="grm-setting-info">
+            <span class="grm-setting-name">Thread search</span>
+            <span class="grm-setting-desc">Search across all pages of a thread</span>
+          </div>
+          <div class="grm-switch">
+            <input type="checkbox" id="grm-setting-search">
+            <span class="grm-switch-slider"></span>
+          </div>
+        </label>
+        <label class="grm-setting-row">
+          <div class="grm-setting-info">
+            <span class="grm-setting-name">Auto-scroll to post</span>
+            <span class="grm-setting-desc">Fix broken #post anchor links</span>
+          </div>
+          <div class="grm-switch">
+            <input type="checkbox" id="grm-setting-scroll">
+            <span class="grm-switch-slider"></span>
+          </div>
+        </label>
+        <label class="grm-setting-row">
+          <div class="grm-setting-info">
+            <span class="grm-setting-name">Post link buttons</span>
+            <span class="grm-setting-desc">Copy a direct link to any post</span>
+          </div>
+          <div class="grm-switch">
+            <input type="checkbox" id="grm-setting-links">
+            <span class="grm-switch-slider"></span>
+          </div>
+        </label>
       </div>
       <div id="grm-search-panel" class="grm-search-panel" style="display: none;">
         <div class="grm-search-controls">
@@ -73,16 +127,75 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
   }
 
   // Attach event listeners to search controls
+  function closePanel() {
+    const panel = document.getElementById('grm-search-panel');
+    if (panel) panel.style.display = 'none';
+  }
+
+  function closeSettingsPanel() {
+    const panel = document.getElementById('grm-settings-panel');
+    if (panel) panel.style.display = 'none';
+  }
+
   function attachEventListeners() {
+    const settingsToggle = document.getElementById('grm-settings-toggle');
+    const settingsPanel = document.getElementById('grm-settings-panel');
     const toggleBtn = document.getElementById('grm-search-toggle');
     const panel = document.getElementById('grm-search-panel');
     const searchInput = document.getElementById('grm-search-input');
     const searchBtn = document.getElementById('grm-search-btn');
 
+    // Settings panel toggle — closes search panel if open
+    settingsToggle.addEventListener('click', () => {
+      const isVisible = settingsPanel.style.display !== 'none';
+      if (isVisible) {
+        closeSettingsPanel();
+      } else {
+        closePanel();
+        settingsPanel.style.display = 'block';
+      }
+    });
+
+    // Sync checkbox states from saved settings
+    const settings = loadSettings();
+    document.getElementById('grm-setting-search').checked = settings.searchEnabled;
+    document.getElementById('grm-setting-scroll').checked = settings.scrollEnabled;
+    document.getElementById('grm-setting-links').checked = settings.linksEnabled;
+
+    // Apply a setting change immediately and persist it
+    document.getElementById('grm-setting-search').addEventListener('change', (e) => {
+      const s = loadSettings();
+      s.searchEnabled = e.target.checked;
+      saveSettings(s);
+      toggleBtn.style.display = s.searchEnabled ? '' : 'none';
+      if (!s.searchEnabled) closePanel();
+    });
+
+    document.getElementById('grm-setting-scroll').addEventListener('change', (e) => {
+      const s = loadSettings();
+      s.scrollEnabled = e.target.checked;
+      saveSettings(s);
+    });
+
+    document.getElementById('grm-setting-links').addEventListener('change', (e) => {
+      const s = loadSettings();
+      s.linksEnabled = e.target.checked;
+      saveSettings(s);
+      if (s.linksEnabled) {
+        addPostLinks();
+      } else {
+        document.querySelectorAll('.grm-post-link-btn').forEach(btn => btn.remove());
+      }
+    });
+
+    // Search toggle — closes settings panel if open
     toggleBtn.addEventListener('click', () => {
       const isVisible = panel.style.display !== 'none';
-      panel.style.display = isVisible ? 'none' : 'block';
-      if (!isVisible) {
+      if (isVisible) {
+        closePanel();
+      } else {
+        closeSettingsPanel();
+        panel.style.display = 'block';
         searchInput.focus();
       }
     });
@@ -91,22 +204,34 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
       performSearch(searchInput.value);
     });
 
-    // Keyboard shortcuts
     searchInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') {
         e.preventDefault();
         performSearch(searchInput.value);
-      } else if (e.key === 'Escape') {
-        panel.style.display = 'none';
       }
     });
 
-    // Global keyboard shortcut: Ctrl+Shift+F or Cmd+Shift+F
+    // Global keyboard shortcuts
     document.addEventListener('keydown', (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'F') {
+      if (e.key === 'Escape') {
+        if (panel.style.display !== 'none') closePanel();
+        else if (settingsPanel.style.display !== 'none') closeSettingsPanel();
+      } else if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'F') {
         e.preventDefault();
-        panel.style.display = 'block';
-        searchInput.focus();
+        if (panel.style.display !== 'none') {
+          closePanel();
+        } else {
+          closeSettingsPanel();
+          panel.style.display = 'block';
+          searchInput.focus();
+        }
+      }
+    });
+
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('#grm-thread-search')) {
+        closePanel();
+        closeSettingsPanel();
       }
     });
   }
@@ -180,38 +305,57 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
     }
   }
 
-  // Search for text in a document
+  // Search for text in a document, tagging each result with its post author
   function searchInDocument(doc, searchTerm, caseSensitive, wholeWord) {
     const results = [];
     const searchRegex = createSearchRegex(searchTerm, caseSensitive, wholeWord);
-
-    // GRM forum: posts are in .post elements, content in .post .content
-    // Search within the .postlist container to avoid navigation/ads
     const postList = doc.querySelector('.postlist');
     const searchRoot = postList || doc.body;
+    const postEls = searchRoot.querySelectorAll('.post');
 
-    // Walk through all text nodes
+    if (postEls.length > 0) {
+      postEls.forEach((postEl, postIndex) => {
+        const postAuthor = getPostAuthor(postEl, postIndex);
+        collectTextMatches(doc, postEl, searchRegex, postIndex, postAuthor, results);
+      });
+    } else {
+      collectTextMatches(doc, searchRoot, searchRegex, 0, null, results);
+    }
+
+    return results;
+  }
+
+  function getPostAuthor(postEl, fallbackIndex) {
+    const selectors = [
+      '.postername', '.username', '.post-author', '.author',
+      'td.postername', 'td.username', 'a.username', 'span.username'
+    ];
+    for (const sel of selectors) {
+      const el = postEl.querySelector(sel);
+      if (el) {
+        const name = el.textContent.trim();
+        if (name) return name;
+      }
+    }
+    return `Post ${fallbackIndex + 1}`;
+  }
+
+  function collectTextMatches(doc, root, searchRegex, postIndex, postAuthor, results) {
     const walker = doc.createTreeWalker(
-      searchRoot,
+      root,
       NodeFilter.SHOW_TEXT,
       {
         acceptNode: function(node) {
-          // Skip script, style, noscript
           if (node.parentElement.tagName === 'SCRIPT' ||
               node.parentElement.tagName === 'STYLE' ||
               node.parentElement.tagName === 'NOSCRIPT') {
             return NodeFilter.FILTER_REJECT;
           }
-
-          // Skip our own search UI (when searching current page)
           let parent = node.parentElement;
           while (parent) {
-            if (parent.id === 'grm-thread-search') {
-              return NodeFilter.FILTER_REJECT;
-            }
+            if (parent.id === 'grm-thread-search') return NodeFilter.FILTER_REJECT;
             parent = parent.parentElement;
           }
-
           return NodeFilter.FILTER_ACCEPT;
         }
       }
@@ -221,25 +365,21 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
     while (node = walker.nextNode()) {
       const text = node.nodeValue;
       if (!text || !text.trim()) continue;
-
-      let match;
       const globalRegex = new RegExp(searchRegex.source, searchRegex.flags);
+      let match;
       while ((match = globalRegex.exec(text)) !== null) {
-        // Get context around the match
         const start = Math.max(0, match.index - 50);
         const end = Math.min(text.length, match.index + match[0].length + 50);
-        const context = text.substring(start, end);
-
         results.push({
           text: match[0],
-          context: context,
+          context: text.substring(start, end),
           fullText: text,
-          index: match.index
+          index: match.index,
+          postIndex,
+          postAuthor
         });
       }
     }
-
-    return results;
   }
 
   // Perform search across all pages
@@ -388,15 +528,33 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
       html += `<div class="grm-page-results">`;
       html += `<div class="grm-page-header">Page ${page.pageNumber} (${page.results.length} match(es))</div>`;
 
-      page.results.slice(0, 10).forEach((result, idx) => {
-        const contextPreview = escapeHtml(result.context)
-          .replace(
-            new RegExp(escapeRegex(result.text), 'gi'),
-            '<mark>$&</mark>'
-          );
+      // Group the first 10 results by post, preserving idx so data-match-index
+      // stays consistent with the sequential matchCount in highlightStoredSearch.
+      const visibleResults = page.results.slice(0, 10);
+      const postGroups = [];
+      const seenPosts = new Map();
+      visibleResults.forEach((result, idx) => {
+        const key = result.postIndex ?? 0;
+        if (!seenPosts.has(key)) {
+          const group = { postAuthor: result.postAuthor || null, items: [] };
+          seenPosts.set(key, group);
+          postGroups.push(group);
+        }
+        seenPosts.get(key).items.push({ result, idx });
+      });
 
-        html += `<div class="grm-result-item" data-url="${escapeHtml(page.pageURL)}" data-match-index="${idx}">`;
-        html += `<div class="grm-result-context">${contextPreview}</div>`;
+      postGroups.forEach(group => {
+        html += `<div class="grm-post-group">`;
+        if (group.postAuthor) {
+          html += `<div class="grm-post-group-header">${escapeHtml(group.postAuthor)}</div>`;
+        }
+        group.items.forEach(({ result, idx }) => {
+          const contextPreview = escapeHtml(result.context)
+            .replace(new RegExp(escapeRegex(result.text), 'gi'), '<mark>$&</mark>');
+          html += `<div class="grm-result-item" data-url="${escapeHtml(page.pageURL)}" data-match-index="${idx}">`;
+          html += `<div class="grm-result-context">${contextPreview}</div>`;
+          html += `</div>`;
+        });
         html += `</div>`;
       });
 
@@ -425,6 +583,8 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
           }));
           // Store which specific match was clicked
           sessionStorage.setItem('grm_match_index', matchIndex);
+          sessionStorage.setItem('grm_target_url', url);
+          sessionStorage.setItem('grm_auto_reopen', 'true');
           // Store the complete search results to restore later
           sessionStorage.setItem('grm_search_results', JSON.stringify(searchResults));
           sessionStorage.setItem('grm_search_from_url', window.location.href);
@@ -473,9 +633,12 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
         currentSearchTerm = storedTerm;
         searchResults = JSON.parse(storedResults);
 
-        // Open the search panel
+        // Only auto-reopen the panel when arriving via a result click;
+        // manual navigation leaves the panel closed even if results exist.
+        const autoReopen = sessionStorage.getItem('grm_auto_reopen');
+        sessionStorage.removeItem('grm_auto_reopen');
         const panel = document.getElementById('grm-search-panel');
-        if (panel) {
+        if (panel && autoReopen === 'true') {
           panel.style.display = 'block';
         }
 
@@ -496,6 +659,23 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
 
         // Display the results
         displayResults();
+
+        // Scroll the results panel to the clicked item and mark it as active
+        const targetURL = sessionStorage.getItem('grm_target_url');
+        const targetMatchIndex = sessionStorage.getItem('grm_match_index');
+        if (targetURL && targetMatchIndex !== null) {
+          const resultsEl = document.getElementById('grm-search-results');
+          if (resultsEl) {
+            for (const item of resultsEl.querySelectorAll('.grm-result-item')) {
+              if (item.getAttribute('data-url') === targetURL &&
+                  item.getAttribute('data-match-index') === targetMatchIndex) {
+                item.classList.add('grm-result-active');
+                item.scrollIntoView({ block: 'nearest' });
+                break;
+              }
+            }
+          }
+        }
 
       } catch (error) {
         console.error('GRM Thread Search: Error restoring search results:', error);
@@ -550,19 +730,29 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
           }
         );
 
-        let matchCount = 0;
-        let targetHighlight = null;
+        // Phase 1: collect matching text nodes without touching the DOM.
+        // replaceChild() detaches the current node, which causes walker.nextNode()
+        // to return null immediately — so we must finish traversal before any replacements.
+        const matchingNodes = [];
         let node;
-
         while (node = walker.nextNode()) {
           const text = node.nodeValue;
-          if (!text || !searchRegex.test(text)) continue;
+          if (!text || !text.trim()) continue;
+          const testRegex = new RegExp(searchRegex.source, searchRegex.flags);
+          if (testRegex.test(text)) matchingNodes.push(node);
+        }
 
-          // Highlight this text node
+        // Phase 2: replace each matched text node with a highlighted fragment.
+        let matchCount = 0;
+        let targetHighlight = null;
+
+        for (const textNode of matchingNodes) {
+          if (!textNode.parentNode) continue;
+          const text = textNode.nodeValue;
           const fragment = document.createDocumentFragment();
           let lastIndex = 0;
+          const globalRegex = new RegExp(searchRegex.source, searchRegex.flags);
           let match;
-          const globalRegex = new RegExp(searchRegex.source, searchRegex.flags + (searchRegex.flags.includes('g') ? '' : 'g'));
 
           while ((match = globalRegex.exec(text)) !== null) {
             if (match.index > lastIndex) {
@@ -575,7 +765,6 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
             highlight.style.fontWeight = '500';
             highlight.style.borderRadius = '2px';
 
-            // Check if this is our target match
             if (matchCount === targetIndex) {
               highlight.classList.add('grm-current');
               highlight.style.backgroundColor = '#fb923c';
@@ -583,7 +772,6 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
               highlight.style.padding = '2px 4px';
               targetHighlight = highlight;
             } else {
-              // Style non-target matches differently
               highlight.style.backgroundColor = '#fef08a';
               highlight.style.color = '#854d0e';
               highlight.style.padding = '2px 0';
@@ -591,7 +779,6 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
 
             fragment.appendChild(highlight);
             matchCount++;
-
             lastIndex = match.index + match[0].length;
           }
 
@@ -599,14 +786,21 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
             fragment.appendChild(document.createTextNode(text.slice(lastIndex)));
           }
 
-          node.parentNode.replaceChild(fragment, node);
+          textNode.parentNode.replaceChild(fragment, textNode);
         }
 
-        // Scroll to the target match
+        // Scroll to the target match. The forum's own JS (ads, lazy images) shifts
+        // layout after initial render, so we retry at increasing delays.
         if (targetHighlight) {
-          setTimeout(() => {
+          const scrollToTarget = () => {
             targetHighlight.scrollIntoView({ behavior: 'smooth', block: 'center' });
-          }, 100);
+          };
+          setTimeout(scrollToTarget, 100);
+          setTimeout(scrollToTarget, 600);
+          setTimeout(scrollToTarget, 1500);
+          if (document.readyState !== 'complete') {
+            window.addEventListener('load', () => setTimeout(scrollToTarget, 200), { once: true });
+          }
         }
 
       } catch (error) {
@@ -615,18 +809,114 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
     }
   }
 
+  const LINK_ICON_SVG = `<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+    <path d="M4.715 6.542 3.343 7.914a3 3 0 1 0 4.243 4.243l1.828-1.829A3 3 0 0 0 8.586 5.5L8 6.086a1.002 1.002 0 0 0-.154.199 2 2 0 0 1 .861 3.337L6.88 11.45a2 2 0 1 1-2.83-2.83l.793-.792a4.018 4.018 0 0 1-.128-1.287z"/>
+    <path d="M6.586 4.672A3 3 0 0 0 7.414 9.5l.775-.776a2 2 0 0 1-.896-3.346L9.12 3.55a2 2 0 1 1 2.83 2.83l-.793.792c.112.42.155.855.128 1.287l1.372-1.372a3 3 0 1 0-4.243-4.243L6.586 4.672z"/>
+  </svg>`;
+
+  const CHECK_ICON_SVG = `<svg width="13" height="13" viewBox="0 0 16 16" fill="currentColor">
+    <path d="M13.854 3.646a.5.5 0 0 1 0 .708l-7 7a.5.5 0 0 1-.708 0l-3.5-3.5a.5.5 0 1 1 .708-.708L6.5 10.293l6.646-6.647a.5.5 0 0 1 .708 0z"/>
+  </svg>`;
+
+  // Inject a small copy-link button onto each post
+  function addPostLinks() {
+    const postList = document.querySelector('.postlist');
+    if (!postList) return;
+
+    postList.querySelectorAll('.post').forEach((postEl, fallbackIndex) => {
+      // The anchor ID may be on the .post element itself or on a child element
+      let postId = /^post\d+$/.test(postEl.id) ? postEl.id : null;
+      if (!postId) {
+        const anchor = postEl.querySelector('[id^="post"]');
+        if (anchor && /^post\d+$/.test(anchor.id)) postId = anchor.id;
+      }
+      if (!postId) return;
+
+      const url = window.location.origin + window.location.pathname +
+                  window.location.search + '#' + postId;
+
+      // Establish a positioning context on the post container.
+      // For table rows use the first TD instead, since TR ignores position:relative.
+      const container = postEl.tagName === 'TR'
+        ? (postEl.querySelector('td') || postEl)
+        : postEl;
+      if (getComputedStyle(container).position === 'static') {
+        container.style.position = 'relative';
+      }
+
+      const btn = document.createElement('button');
+      btn.className = 'grm-post-link-btn';
+      btn.title = 'Copy link to this post';
+      btn.innerHTML = LINK_ICON_SVG;
+
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const copied = () => {
+          btn.innerHTML = CHECK_ICON_SVG;
+          btn.classList.add('grm-post-link-copied');
+          setTimeout(() => {
+            btn.innerHTML = LINK_ICON_SVG;
+            btn.classList.remove('grm-post-link-copied');
+          }, 2000);
+        };
+        navigator.clipboard.writeText(url).then(copied).catch(() => {
+          // Fallback for browsers without clipboard API access
+          const ta = document.createElement('textarea');
+          ta.value = url;
+          ta.style.position = 'fixed';
+          ta.style.opacity = '0';
+          document.body.appendChild(ta);
+          ta.select();
+          document.execCommand('copy');
+          document.body.removeChild(ta);
+          copied();
+        });
+      });
+
+      container.appendChild(btn);
+    });
+  }
+
+  // Re-scroll to a #postNNNNNN anchor after GRM's JS finishes shifting the layout.
+  // The browser's native anchor scroll fires before ads/images load, so it gets displaced.
+  // scroll-margin-top on the post elements handles the fixed-header offset (see styles.css).
+  function scrollToAnchorPost() {
+    const hash = window.location.hash;
+    if (!hash || !/^#post\d+$/.test(hash)) return;
+
+    const target = document.querySelector(hash);
+    if (!target) return;
+
+    const scroll = () => target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    setTimeout(scroll, 100);
+    setTimeout(scroll, 600);
+    setTimeout(scroll, 1500);
+    if (document.readyState !== 'complete') {
+      window.addEventListener('load', () => setTimeout(scroll, 200), { once: true });
+    }
+  }
+
   // Initialize the extension
   function init() {
-    if (document.readyState === 'loading') {
-      document.addEventListener('DOMContentLoaded', () => {
-        createSearchUI();
-        restoreSearchResults();  // Restore search results first
-        highlightStoredSearch();  // Then highlight matches on the page
-      });
-    } else {
+    const setup = () => {
+      const settings = loadSettings();
       createSearchUI();
-      restoreSearchResults();
-      highlightStoredSearch();
+      // Hide search button if feature is disabled
+      if (!settings.searchEnabled) {
+        document.getElementById('grm-search-toggle').style.display = 'none';
+      }
+      if (settings.searchEnabled) {
+        restoreSearchResults();
+        highlightStoredSearch();
+      }
+      if (settings.scrollEnabled) scrollToAnchorPost();
+      if (settings.linksEnabled) addPostLinks();
+    };
+
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', setup);
+    } else {
+      setup();
     }
   }
 
