@@ -1,11 +1,15 @@
 {
   "manifest_version": 3,
-  "name": "GRM Forum Thread Search",
-  "version": "2.0.0",
-  "description": "Search within threads on Grassroots Motorsports forum",
+  "name": "GRM Forum Extension",
+  "version": "2.1.0",
+  "description": "Enhancements for the Grassroots Motorsports forum: multi-page thread search, post anchor scroll fix, and per-post copy-link buttons",
   "permissions": [
-    "activeTab"
+    "activeTab",
+    "storage"
   ],
+  "action": {
+    "default_popup": "popup.html"
+  },
   "content_scripts": [
     {
       "matches": [

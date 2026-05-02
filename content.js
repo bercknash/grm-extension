@@ -1,21 +1,9 @@
-// GRM Forum Thread Search Extension v2.0.0
-// Adds in-thread search functionality across all pages of Grassroots Motorsports forum
-
-console.log('GRM Thread Search: Script loaded!');
-console.log('GRM Thread Search: Current URL:', window.location.href);
+// GRM Forum Extension v2.1.0
 
 (function() {
   'use strict';
 
-  console.log('GRM Thread Search: Inside IIFE');
-
-  // Only run on thread pages
-  if (!isThreadPage()) {
-    console.log('GRM Thread Search: Not a thread page, exiting');
-    return;
-  }
-
-  console.log('GRM Thread Search: Is a thread page, initializing...');
+  if (!isThreadPage()) return;
 
   let currentSearchTerm = '';
   let searchResults = [];
@@ -23,19 +11,24 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
   let allPages = [];
   let isSearching = false;
 
-  const DEFAULT_SETTINGS = { searchEnabled: true, scrollEnabled: true, linksEnabled: true };
+  const DEFAULT_SETTINGS = {
+    searchEnabled: true,
+    scrollEnabled: true,
+    linksEnabled: true,
+    floatingEnabled: true,
+  };
 
   function loadSettings() {
-    try {
-      const stored = localStorage.getItem('grm_ext_settings');
-      return stored ? { ...DEFAULT_SETTINGS, ...JSON.parse(stored) } : { ...DEFAULT_SETTINGS };
-    } catch {
-      return { ...DEFAULT_SETTINGS };
-    }
+    return new Promise(resolve => {
+      chrome.storage.local.get('grm_ext_settings', data => {
+        const stored = data.grm_ext_settings;
+        resolve(stored ? { ...DEFAULT_SETTINGS, ...stored } : { ...DEFAULT_SETTINGS });
+      });
+    });
   }
 
   function saveSettings(settings) {
-    localStorage.setItem('grm_ext_settings', JSON.stringify(settings));
+    chrome.storage.local.set({ grm_ext_settings: settings });
   }
 
   // Create and inject the search UI
@@ -61,7 +54,7 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
         <label class="grm-setting-row">
           <div class="grm-setting-info">
             <span class="grm-setting-name">Thread search</span>
-            <span class="grm-setting-desc">Search across all pages of a thread</span>
+            <span class="grm-setting-desc">Search all pages of the current thread</span>
           </div>
           <div class="grm-switch">
             <input type="checkbox" id="grm-setting-search">
@@ -88,10 +81,20 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
             <span class="grm-switch-slider"></span>
           </div>
         </label>
+        <label class="grm-setting-row">
+          <div class="grm-setting-info">
+            <span class="grm-setting-name">Show floating buttons</span>
+            <span class="grm-setting-desc">Display gear and search icons on page</span>
+          </div>
+          <div class="grm-switch">
+            <input type="checkbox" id="grm-setting-floating">
+            <span class="grm-switch-slider"></span>
+          </div>
+        </label>
       </div>
       <div id="grm-search-panel" class="grm-search-panel" style="display: none;">
         <div class="grm-search-controls">
-          <input type="text" id="grm-search-input" placeholder="Search across all pages..." />
+          <input type="text" id="grm-search-input" placeholder="Search this thread..." />
           <button id="grm-search-btn" class="grm-search-btn">Search</button>
         </div>
         <div class="grm-search-options">
@@ -114,16 +117,10 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
     `;
 
     document.body.appendChild(searchContainer);
-    attachEventListeners();
   }
 
-  // Check if we're on a thread page
   function isThreadPage() {
-    const isForumPage = window.location.pathname.includes('/forum/');
-    console.log('GRM Thread Search: Checking if thread page');
-    console.log('- URL:', window.location.href);
-    console.log('- Is forum page:', isForumPage);
-    return isForumPage;
+    return window.location.pathname.includes('/forum/');
   }
 
   // Attach event listeners to search controls
@@ -137,7 +134,7 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
     if (panel) panel.style.display = 'none';
   }
 
-  function attachEventListeners() {
+  async function attachEventListeners() {
     const settingsToggle = document.getElementById('grm-settings-toggle');
     const settingsPanel = document.getElementById('grm-settings-panel');
     const toggleBtn = document.getElementById('grm-search-toggle');
@@ -145,7 +142,6 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
     const searchInput = document.getElementById('grm-search-input');
     const searchBtn = document.getElementById('grm-search-btn');
 
-    // Settings panel toggle — closes search panel if open
     settingsToggle.addEventListener('click', () => {
       const isVisible = settingsPanel.style.display !== 'none';
       if (isVisible) {
@@ -157,28 +153,28 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
     });
 
     // Sync checkbox states from saved settings
-    const settings = loadSettings();
-    document.getElementById('grm-setting-search').checked = settings.searchEnabled;
-    document.getElementById('grm-setting-scroll').checked = settings.scrollEnabled;
-    document.getElementById('grm-setting-links').checked = settings.linksEnabled;
+    const settings = await loadSettings();
+    document.getElementById('grm-setting-search').checked   = settings.searchEnabled;
+    document.getElementById('grm-setting-scroll').checked   = settings.scrollEnabled;
+    document.getElementById('grm-setting-links').checked    = settings.linksEnabled;
+    document.getElementById('grm-setting-floating').checked = settings.floatingEnabled;
 
-    // Apply a setting change immediately and persist it
-    document.getElementById('grm-setting-search').addEventListener('change', (e) => {
-      const s = loadSettings();
+    document.getElementById('grm-setting-search').addEventListener('change', async (e) => {
+      const s = await loadSettings();
       s.searchEnabled = e.target.checked;
       saveSettings(s);
       toggleBtn.style.display = s.searchEnabled ? '' : 'none';
       if (!s.searchEnabled) closePanel();
     });
 
-    document.getElementById('grm-setting-scroll').addEventListener('change', (e) => {
-      const s = loadSettings();
+    document.getElementById('grm-setting-scroll').addEventListener('change', async (e) => {
+      const s = await loadSettings();
       s.scrollEnabled = e.target.checked;
       saveSettings(s);
     });
 
-    document.getElementById('grm-setting-links').addEventListener('change', (e) => {
-      const s = loadSettings();
+    document.getElementById('grm-setting-links').addEventListener('change', async (e) => {
+      const s = await loadSettings();
       s.linksEnabled = e.target.checked;
       saveSettings(s);
       if (s.linksEnabled) {
@@ -188,7 +184,14 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
       }
     });
 
-    // Search toggle — closes settings panel if open
+    document.getElementById('grm-setting-floating').addEventListener('change', async (e) => {
+      const s = await loadSettings();
+      s.floatingEnabled = e.target.checked;
+      saveSettings(s);
+      const header = document.querySelector('.grm-search-header');
+      if (header) header.style.display = s.floatingEnabled ? '' : 'none';
+    });
+
     toggleBtn.addEventListener('click', () => {
       const isVisible = panel.style.display !== 'none';
       if (isVisible) {
@@ -211,7 +214,6 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
       }
     });
 
-    // Global keyboard shortcuts
     document.addEventListener('keydown', (e) => {
       if (e.key === 'Escape') {
         if (panel.style.display !== 'none') closePanel();
@@ -896,14 +898,55 @@ console.log('GRM Thread Search: Current URL:', window.location.href);
     }
   }
 
+  // Message listener — lets the popup drive in-page panels and sync settings
+  chrome.runtime.onMessage.addListener((message) => {
+    if (message.action === 'openSearch') {
+      const panel = document.getElementById('grm-search-panel');
+      if (panel) {
+        closeSettingsPanel();
+        panel.style.display = 'block';
+        setTimeout(() => document.getElementById('grm-search-input')?.focus(), 50);
+      }
+    } else if (message.action === 'applySetting') {
+      const { key, value } = message;
+      // Keep in-page checkboxes in sync with popup
+      const checkboxMap = {
+        searchEnabled:  'grm-setting-search',
+        scrollEnabled:  'grm-setting-scroll',
+        linksEnabled:   'grm-setting-links',
+        floatingEnabled:'grm-setting-floating',
+      };
+      const cb = document.getElementById(checkboxMap[key]);
+      if (cb) cb.checked = value;
+
+      if (key === 'searchEnabled') {
+        const btn = document.getElementById('grm-search-toggle');
+        if (btn) btn.style.display = value ? '' : 'none';
+        if (!value) closePanel();
+      } else if (key === 'linksEnabled') {
+        if (value) addPostLinks();
+        else document.querySelectorAll('.grm-post-link-btn').forEach(b => b.remove());
+      } else if (key === 'floatingEnabled') {
+        const header = document.querySelector('.grm-search-header');
+        if (header) header.style.display = value ? '' : 'none';
+      }
+    }
+    return false;
+  });
+
   // Initialize the extension
   function init() {
-    const setup = () => {
-      const settings = loadSettings();
+    const setup = async () => {
+      const settings = await loadSettings();
       createSearchUI();
-      // Hide search button if feature is disabled
+      await attachEventListeners();
+
       if (!settings.searchEnabled) {
         document.getElementById('grm-search-toggle').style.display = 'none';
+      }
+      if (!settings.floatingEnabled) {
+        const header = document.querySelector('.grm-search-header');
+        if (header) header.style.display = 'none';
       }
       if (settings.searchEnabled) {
         restoreSearchResults();
