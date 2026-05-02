@@ -146,6 +146,13 @@
     const panel = document.getElementById('grm-search-panel');
     if (panel) panel.style.display = 'none';
     clearHighlights();
+    sessionStorage.removeItem('grm_search_results');
+    sessionStorage.removeItem('grm_search_term');
+    sessionStorage.removeItem('grm_search_options');
+    sessionStorage.removeItem('grm_search_from_url');
+    sessionStorage.removeItem('grm_auto_reopen');
+    sessionStorage.removeItem('grm_match_index');
+    sessionStorage.removeItem('grm_target_url');
     // Leave padding-right in place; clears on navigation.
   }
 
