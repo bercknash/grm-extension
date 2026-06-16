@@ -273,6 +273,30 @@
   min-height: 20px;
 }
 
+.grm-search-warning {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #e5e7eb;
+  color: #92400e;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.grm-retry-btn {
+  margin-left: 4px;
+  padding: 2px 8px;
+  background: #f59e0b;
+  color: #fff;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.grm-retry-btn:hover {
+  background: #d97706;
+}
+
 .grm-search-results {
   max-height: calc(80vh - 160px);
   overflow-y: auto;
@@ -449,6 +473,11 @@
   .grm-search-status {
     background: #374151;
     color: #f3f4f6;
+  }
+
+  .grm-search-warning {
+    border-top-color: #4b5563;
+    color: #fcd34d;
   }
 
   .grm-page-results {

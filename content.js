@@ -1,4 +1,4 @@
-// GRM Forum Extension v2.1.0
+// GRM Forum Extension v2.2.1
 
 (function() {
   'use strict';
@@ -10,6 +10,19 @@
   let currentResultIndex = 0;
   let allPages = [];
   let isSearching = false;
+  let lastFailedPages = [];
+
+  // Proactive rate limiter: no two fetches start less than fetchInterval ms apart.
+  // Starts fast so short threads are quick; bumps to THROTTLED_INTERVAL after the
+  // first 429 so long threads self-pace under the server's ~25-requests/60s limit
+  // instead of repeatedly hitting the 60-second cooldown.
+  let nextFetchAllowed = 0;
+  let fetchInterval = 400;
+  const BASE_INTERVAL = 400;
+  const THROTTLED_INTERVAL = 2500;
+
+  // Sentinel distinguishing "page could not be loaded" from "page loaded, no matches".
+  const FETCH_FAILED = Symbol('fetch-failed');
 
   const DEFAULT_SETTINGS = {
     searchEnabled: true,
@@ -153,6 +166,7 @@
     sessionStorage.removeItem('grm_auto_reopen');
     sessionStorage.removeItem('grm_match_index');
     sessionStorage.removeItem('grm_target_url');
+    sessionStorage.removeItem('grm_failed_pages');
     // Leave padding-right in place; clears on navigation.
   }
 
@@ -338,18 +352,63 @@
     return urls;
   }
 
-  // Fetch HTML content from a URL
-  async function fetchPageContent(url) {
-    try {
-      const response = await fetch(url);
-      const html = await response.text();
-      const parser = new DOMParser();
-      const doc = parser.parseFromString(html, 'text/html');
-      return doc;
-    } catch (error) {
-      console.error('Error fetching page:', url, error);
-      return null;
+  // Sleep for ms, calling onTick each second with the remaining seconds so the UI
+  // can show a live countdown instead of appearing frozen during long backoffs.
+  async function sleepWithCountdown(ms, onTick) {
+    const until = Date.now() + ms;
+    while (Date.now() < until) {
+      if (onTick) onTick(Math.ceil((until - Date.now()) / 1000));
+      await new Promise(r => setTimeout(r, Math.min(1000, until - Date.now())));
     }
+  }
+
+  // Fetch HTML content from a URL, with proactive rate limiting and backoff on 429.
+  // onWait(secondsRemaining) is called during any forced cooldown.
+  async function fetchPageContent(url, onWait) {
+    const MAX_RETRIES = 5;
+    const BASE_DELAY = 1000;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+      try {
+        // Reserve a fetch slot: push nextFetchAllowed forward before awaiting,
+        // so concurrent workers see the updated value and stagger automatically.
+        const wait = Math.max(0, nextFetchAllowed - Date.now());
+        nextFetchAllowed = Date.now() + wait + fetchInterval;
+        if (wait > 0) await new Promise(r => setTimeout(r, wait));
+
+        const response = await fetch(url);
+        if (response.status === 429) {
+          if (attempt === MAX_RETRIES) {
+            console.warn(`GRM Thread Search: giving up on ${url} after ${MAX_RETRIES} retries`);
+            return FETCH_FAILED;
+          }
+          // We've hit the server's rate limit — slow all subsequent fetches so we
+          // stop bouncing off the 60-second cooldown for the rest of this search.
+          fetchInterval = THROTTLED_INTERVAL;
+          const retryAfter = parseInt(response.headers.get('retry-after') || '0', 10);
+          const delay = retryAfter > 0 ? retryAfter * 1000 : BASE_DELAY * Math.pow(2, attempt);
+          nextFetchAllowed = Math.max(nextFetchAllowed, Date.now() + delay);
+          console.warn(`GRM Thread Search: 429 for ${url}, retrying in ${delay}ms (attempt ${attempt + 1})`);
+          await sleepWithCountdown(delay, onWait);
+          continue;
+        }
+        if (!response.ok) {
+          console.warn(`GRM Thread Search: HTTP ${response.status} for ${url}`);
+          return FETCH_FAILED;
+        }
+        const doc = new DOMParser().parseFromString(await response.text(), 'text/html');
+        // Detect Cloudflare JS challenge pages (200 OK but no forum content)
+        if (!doc.querySelector('.postlist') && !doc.querySelector('.post')) {
+          console.warn(`GRM Thread Search: No forum content at ${url} (possible Cloudflare challenge)`);
+          return FETCH_FAILED;
+        }
+        return doc;
+      } catch (error) {
+        console.error('Error fetching page:', url, error);
+        return FETCH_FAILED;
+      }
+    }
+    return FETCH_FAILED;
   }
 
   // Search for text in a document, tagging each result with its post author
@@ -444,12 +503,15 @@
     currentSearchTerm = searchTerm;
     searchResults = [];
     currentResultIndex = 0;
+    lastFailedPages = [];
+    fetchInterval = BASE_INTERVAL;
 
     // Clear any previously stored search results when starting a new search
     sessionStorage.removeItem('grm_search_results');
     sessionStorage.removeItem('grm_search_term');
     sessionStorage.removeItem('grm_search_options');
     sessionStorage.removeItem('grm_search_from_url');
+    sessionStorage.removeItem('grm_failed_pages');
 
     const caseSensitive = document.getElementById('grm-case-sensitive').checked;
     const wholeWord = document.getElementById('grm-whole-word').checked;
@@ -480,36 +542,52 @@
 
         statusEl.textContent = `Found ${pageURLs.length} page(s). Searching...`;
 
-        // Fetch and search all pages IN PARALLEL for much better performance
+        // Fetch sequentially (concurrency 1): this forum's Cloudflare config rate-limits
+        // even 2 parallel requests, so parallelism causes dropped pages. The fetchInterval
+        // spacing plus sequential ordering keeps us under the threshold.
+        const CONCURRENCY = 1;
         let completedPages = 0;
-        const searchPromises = pageURLs.map(async (url, index) => {
-          try {
-            const doc = await fetchPageContent(url);
-            completedPages++;
-            statusEl.textContent = `Searching... (${completedPages}/${pageURLs.length} pages loaded)`;
+        let urlIndex = 0;
+        const allResults = new Array(pageURLs.length).fill(null);
+        const failedPages = [];
 
-            if (doc) {
+        const searchWorker = async () => {
+          while (urlIndex < pageURLs.length) {
+            const i = urlIndex++;
+            const url = pageURLs[i];
+            const pageNum = getPageNumberFromURL(url);
+            try {
+              const onWait = (secs) => {
+                statusEl.textContent = `Server rate limit reached — resuming in ${secs}s `
+                  + `(${completedPages}/${pageURLs.length} pages loaded)`;
+              };
+              const doc = await fetchPageContent(url, onWait);
+              completedPages++;
+              statusEl.textContent = `Searching... (${completedPages}/${pageURLs.length} pages loaded)`;
+              if (doc === FETCH_FAILED) {
+                failedPages.push(pageNum);
+                continue;
+              }
               const results = searchInDocument(doc, searchTerm, caseSensitive, wholeWord);
               if (results.length > 0) {
-                return {
+                allResults[i] = {
                   pageURL: url,
-                  pageNumber: getPageNumberFromURL(url),
+                  pageNumber: pageNum,
                   results: results
                 };
               }
+            } catch (error) {
+              console.error('Error searching page:', url, error);
+              failedPages.push(pageNum);
             }
-            return null;
-          } catch (error) {
-            console.error('Error searching page:', url, error);
-            return null;
           }
-        });
+        };
 
-        // Wait for all pages to complete
-        const allResults = await Promise.all(searchPromises);
+        await Promise.all(Array.from({ length: Math.min(CONCURRENCY, pageURLs.length) }, searchWorker));
 
         // Filter out null results (pages with no matches or errors)
         searchResults = allResults.filter(r => r !== null);
+        lastFailedPages = failedPages.sort((a, b) => a - b);
       }
 
       // Display results
@@ -524,6 +602,7 @@
           wholeWord: wholeWord
         }));
         sessionStorage.setItem('grm_search_from_url', window.location.href);
+        sessionStorage.setItem('grm_failed_pages', JSON.stringify(lastFailedPages));
       }
 
     } catch (error) {
@@ -560,13 +639,23 @@
     // Count total matches
     const totalMatches = searchResults.reduce((sum, page) => sum + page.results.length, 0);
 
+    // Warn about any pages that couldn't be loaded (rate-limited / blocked), since
+    // their matches are missing from the results and totals would otherwise mislead.
+    const failedNote = lastFailedPages.length > 0
+      ? `<div class="grm-search-warning">⚠ ${lastFailedPages.length} page(s) couldn't be loaded `
+        + `(${lastFailedPages.join(', ')}) — results may be incomplete. `
+        + `<button id="grm-retry-failed" class="grm-retry-btn">Retry</button></div>`
+      : '';
+
     if (totalMatches === 0) {
-      statusEl.textContent = `No results found for "${currentSearchTerm}"`;
+      statusEl.innerHTML = `No results found for "${escapeHtml(currentSearchTerm)}"` + failedNote;
       resultsEl.innerHTML = '';
+      wireRetryButton();
       return;
     }
 
-    statusEl.textContent = `Found ${totalMatches} match(es) across ${searchResults.length} page(s)`;
+    statusEl.innerHTML = `Found ${totalMatches} match(es) across ${searchResults.length} page(s)` + failedNote;
+    wireRetryButton();
 
     // Build results HTML
     let html = '<div class="grm-results-list">';
@@ -642,6 +731,58 @@
     });
   }
 
+  function wireRetryButton() {
+    const btn = document.getElementById('grm-retry-failed');
+    if (btn) btn.addEventListener('click', retryFailedPages);
+  }
+
+  // Re-fetch only the pages that failed last time and merge their matches in,
+  // so a transient rate-limit on a few pages doesn't require re-scanning the thread.
+  async function retryFailedPages() {
+    if (isSearching || lastFailedPages.length === 0) return;
+    isSearching = true;
+
+    const statusEl = document.getElementById('grm-search-status');
+    const caseSensitive = document.getElementById('grm-case-sensitive').checked;
+    const wholeWord = document.getElementById('grm-whole-word').checked;
+    const base = window.location.href.match(/^(.*\/forum\/[^\/]+\/[^\/]+\/\d+\/)/)?.[1];
+
+    if (!base) { isSearching = false; return; }
+
+    const toRetry = lastFailedPages.slice();
+    const stillFailed = [];
+    let done = 0;
+    // A retry only happens after we were rate-limited, so start throttled.
+    fetchInterval = THROTTLED_INTERVAL;
+
+    try {
+      for (const pageNum of toRetry) {
+        const url = `${base}page${pageNum}/`;
+        const onWait = (secs) =>
+          statusEl.textContent = `Server rate limit reached — resuming in ${secs}s (${done}/${toRetry.length} retried)`;
+        const doc = await fetchPageContent(url, onWait);
+        done++;
+        statusEl.textContent = `Retrying... (${done}/${toRetry.length})`;
+        if (doc === FETCH_FAILED) { stillFailed.push(pageNum); continue; }
+        const results = searchInDocument(doc, currentSearchTerm, caseSensitive, wholeWord);
+        if (results.length > 0) {
+          searchResults.push({ pageURL: url, pageNumber: pageNum, results });
+        }
+      }
+
+      searchResults.sort((a, b) => a.pageNumber - b.pageNumber);
+      lastFailedPages = stillFailed.sort((a, b) => a - b);
+      displayResults();
+
+      if (searchResults.length > 0) {
+        sessionStorage.setItem('grm_search_results', JSON.stringify(searchResults));
+        sessionStorage.setItem('grm_failed_pages', JSON.stringify(lastFailedPages));
+      }
+    } finally {
+      isSearching = false;
+    }
+  }
+
   // Create search regex based on options
   function createSearchRegex(searchText, caseSensitive, wholeWord) {
     let pattern = searchText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -687,12 +828,18 @@
       sessionStorage.removeItem('grm_auto_reopen');
       sessionStorage.removeItem('grm_match_index');
       sessionStorage.removeItem('grm_target_url');
+      sessionStorage.removeItem('grm_failed_pages');
       return;
     }
 
     if (storedResults && storedTerm) {
       try {
         console.log('GRM Thread Search: Restoring previous search results');
+
+        // Restore the incomplete-search warning state so restored (possibly partial)
+        // results don't appear complete when some pages had failed to load.
+        const storedFailed = sessionStorage.getItem('grm_failed_pages');
+        lastFailedPages = storedFailed ? JSON.parse(storedFailed) : [];
 
         // Restore the search state
         currentSearchTerm = storedTerm;
